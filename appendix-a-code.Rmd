@@ -1,0 +1,125 @@
+---
+title: 'Practical Mixed Models for Actuaries'
+subtitle: 'Code Chuncks Extracted via AWK script'
+author: 'Ernesto Schirmacher'
+output: html_notebook
+---
+
+## Appendix A--B&uuml;hlmann-Straub Simulation
+
+```{r}
+#| include: true
+#| message: false
+
+library(tidyverse)
+library(patchwork)
+library(lme4)
+```
+
+```{r}
+sim.BS <- function(
+    sim.label = "A",
+    J = 100,
+    N = 5,
+    beta = 80,
+    sigma.b.sq = 64,
+    sigma.sq = 100,
+    weight.min = 0.5,
+    weight.spread = 1) {
+  
+  risk.dev <- rep(rnorm(J, mean = 0, sd = sqrt(sigma.b.sq)),
+                  each = N)
+  time.dev <- rnorm(J * N, mean = 0, sd = sqrt(sigma.sq))
+  weight <- weight.min + runif(J * N, min = 0, max = weight.spread)
+  tb <- tibble(
+    sim.label = rep(sim.label, J * N),
+    risk = factor(rep(1:J, each = N)),
+    Wt = weight,
+    rsk.dev = risk.dev,
+    tme.dev = time.dev,
+    Y = beta + rsk.dev + tme.dev
+  )
+  return(tb)
+}
+```
+
+```{r}
+set.seed(398845)
+BS.data <- list(
+  BS.5  = sim.BS(sim.label =  "5 Obs. per Risk", N =  5),
+  BS.10 = sim.BS(sim.label = "10 Obs. per Risk", N = 10),
+  BS.20 = sim.BS(sim.label = "20 Obs. per Risk", N = 20),
+  BS.40 = sim.BS(sim.label = "40 Obs. per Risk", N = 40)
+)
+```
+
+```{r}
+BS.models <- map(BS.data,
+                 \(d) lmer(Y ~ 1 + (1 | risk),
+                           data = d,
+                           weights = Wt))
+```
+
+```{r}
+BS.FV.Res <- map(BS.models,
+                 \(m) {
+                   tb <- getData(m)
+                   tb$mu <- fitted(m)
+                   tb$rsP <- resid(m, type = "pearson") / sigma(m)
+                   return(tb)})
+
+BS.slopes <- map_dbl(BS.FV.Res,
+                     \(tb) {
+                       fm <- lm(rsP ~ mu,
+                                data = tb)
+                       sfm <- summary(fm)
+                       return(coef(sfm)[2,1])})
+
+BS.pvals <- map_dbl(BS.FV.Res,
+                    \(tb) {
+                      fm <- lm(rsP ~ mu,
+                               data = tb)
+                      sfm <- summary(fm)
+                      return(coef(sfm)[2,4])})
+```
+
+```{r}
+BS.results <- reduce(BS.FV.Res, bind_rows)
+BS.results$sim.label <- factor(BS.results$sim.label)
+BS.results$sim.label <- fct_relevel(
+  BS.results$sim.label,
+  str_c(str_sub(names(BS.slopes), 4), 
+        " Obs. per Risk")[order(BS.slopes,
+                                decreasing = TRUE)])
+```
+
+```{r}
+tb <- round(rbind(BS.slopes,
+      BS.pvals), 4)
+dimnames(tb) <- list(c("Slope", "P-Value"),
+                     c("5 Obs.", "10 Obs.", "20 Obs.", "40 Obs."))
+tb
+```
+
+```{r}
+#| label: fig-BS-sim-obs-per-risk
+#| fig-cap: "Results of fitting a linear regression model to simulated data from the B&uuml;hlmann-Straub model. The panels have been arranged from the largest slope in the upper-left (5 Obs. per Risk) to the smallest slope in the lower-right (40 Obs. per Risk)."
+#| message: false
+
+ggplot(data = BS.results,
+       mapping = aes(x = mu,
+                     y = rsP)) +
+  facet_wrap(vars(sim.label)) +
+  geom_point(pch = 1, alpha = 0.2) +
+  geom_smooth(method = "lm") +
+  labs(x = "Fitted Values",
+       y = "Standardized Residuals")
+```
+
+```{r}
+#| include: false
+
+rm(list = c(ls(pattern = "[Bb][Ss]"),
+            "tb"))
+```
+
