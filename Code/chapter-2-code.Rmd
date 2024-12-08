@@ -3,6 +3,7 @@ title: 'Practical Mixed Models for Actuaries'
 subtitle: 'Code Chuncks Extracted via AWK script'
 author: 'Ernesto Schirmacher'
 output: html_notebook
+temporary: in review (to be deleted)
 ---
 
 ## Chapter 2--GLM Review
